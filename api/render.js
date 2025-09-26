@@ -67,7 +67,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { title, body, handle="@dobfox", pageNo="1/1", width=1080, height=1350 } = req.body;
+    const { title, body, handle = "@dobfox", pageNo = "1/1", width = 1080, height = 1350 } = req.body;
     const html = toHtml(title, body, handle, pageNo, width, height);
 
     const browser = await puppeteer.launch({
