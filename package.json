@@ -6,9 +6,12 @@
     "start": "vercel dev"
   },
   "dependencies": {
-    "chrome-aws-lambda": "^10.1.0",
-    "puppeteer-core": "^22.11.0",
+    "@sparticuz/chrome-aws-lambda": "^19.2.1",
+    "puppeteer-core": "^19.2.1",
     "markdown-it": "^14.1.0",
     "sanitize-html": "^2.13.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
