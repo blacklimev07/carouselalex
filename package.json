@@ -6,8 +6,8 @@
     "start": "vercel dev"
   },
   "dependencies": {
-    "markdown-it": "^14.1.0",
-    "sanitize-html": "^2.13.0",
-    "puppeteer": "^22.11.0"
-  }
+  "chrome-aws-lambda": "^10.1.0",
+  "puppeteer-core": "^22.11.0",
+  "markdown-it": "^14.1.0",
+  "sanitize-html": "^2.13.0"
 }
