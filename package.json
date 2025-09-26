@@ -1,0 +1,13 @@
+{
+  "name": "carousel-notes-api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0",
+    "sanitize-html": "^2.13.0",
+    "puppeteer": "^22.11.0"
+  }
+}
