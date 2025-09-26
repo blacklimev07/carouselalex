@@ -2,6 +2,7 @@ import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import MarkdownIt from "markdown-it";
 import sanitizeHtml from "sanitize-html";
+import { put } from "@vercel/blob"; // 👈 добавили
 
 const md = new MarkdownIt({ html: false, breaks: true, typographer: true });
 
@@ -14,7 +15,8 @@ export default async function handler(req, res) {
     handle = "@anon",
     pageNo = "1/1",
     width = 1080,
-    height = 1350
+    height = 1350,
+    filename
   } = req.body || {};
 
   try {
@@ -64,9 +66,23 @@ export default async function handler(req, res) {
 
     await browser.close();
 
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Disposition", 'inline; filename="note.png"');
-    return res.send(buffer);
+    // 👇 сохраняем в Blob
+    const safeFile =
+      (filename && String(filename).replace(/[^\w.-]/g, "_")) ||
+      `note_${Date.now()}.png`;
+
+    const blob = await put(safeFile, buffer, {
+      access: "public",
+      contentType: "image/png",
+      addRandomSuffix: true
+    });
+
+    return res.status(200).json({
+      ok: true,
+      url: blob.url, // 🔗 вот ссылка на скачивание
+      filename: safeFile
+    });
+
   } catch (err) {
     console.error("Renderer error:", err);
     res.status(500).json({ error: "Failed to render image", detail: String(err) });
