@@ -6,7 +6,7 @@
     "start": "vercel dev"
   },
   "dependencies": {
-    "@sparticuz/chrome-aws-lambda": "^20.0.2",
+    "@sparticuz/chrome-aws-lambda": "20.2.2",
     "puppeteer-core": "20.9.0",
     "markdown-it": "14.1.0",
     "sanitize-html": "2.13.0"
