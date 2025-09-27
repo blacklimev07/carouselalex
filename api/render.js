@@ -4,10 +4,16 @@ import puppeteer from "puppeteer-core";
 import MarkdownIt from "markdown-it";
 import sanitizeHtml from "sanitize-html";
 
-const md = new MarkdownIt({ html: false, breaks: true, linkify: false, typographer: true });
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: false,
+  typographer: true,
+});
+
 const safe = (s) => String(s ?? "");
 
-// ——— Dropbox / Drive → raw
+// ---- Dropbox / Drive → raw ----
 function normalizeImageUrl(u = "") {
   try {
     const url = new URL(u);
@@ -22,16 +28,19 @@ function normalizeImageUrl(u = "") {
       if (m && m[1]) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
     }
     return u;
-  } catch { return u; }
+  } catch {
+    return u;
+  }
 }
 
-// ——— тянем изображение на сервер → data:URL
+// ---- Скачиваем изображение на сервере → data: (обход CORS/hotlink) ----
 async function fetchToDataUrl(url) {
   if (!url) return null;
   const norm = normalizeImageUrl(url);
   const resp = await fetch(norm, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     },
     redirect: "follow",
@@ -41,12 +50,15 @@ async function fetchToDataUrl(url) {
   const buf = Buffer.from(await resp.arrayBuffer());
   const ct =
     resp.headers.get("content-type") ||
-    (/\.(png)(\?|$)/i.test(norm) ? "image/png" :
-     /\.(webp)(\?|$)/i.test(norm) ? "image/webp" : "image/jpeg");
+    (/\.(png)(\?|$)/i.test(norm)
+      ? "image/png"
+      : /\.(webp)(\?|$)/i.test(norm)
+      ? "image/webp"
+      : "image/jpeg");
   return `data:${ct};base64,${buf.toString("base64")}`;
 }
 
-// ——— общий каркас
+// ---- Общая «рамка» страницы ----
 function pageShell(inner, { width = 1080, height = 1350 } = {}) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"/>
   <style>
@@ -65,7 +77,15 @@ function pageShell(inner, { width = 1080, height = 1350 } = {}) {
 // =====================
 // 1) Фото + хук (photo_caption)
 // =====================
-function buildPhotoHTML({ imgSrc, hook, handle, pageNo, fit = "cover", width = 1080, height = 1350 }) {
+function buildPhotoHTML({
+  imgSrc,
+  hook,
+  handle,
+  pageNo,
+  fit = "cover",
+  width = 1080,
+  height = 1350,
+}) {
   const objectFit = fit === "contain" ? "contain" : "cover";
   const inner = `
     <div class="wrap">
@@ -75,79 +95,85 @@ function buildPhotoHTML({ imgSrc, hook, handle, pageNo, fit = "cover", width = 1
                style="width:100%;height:100%;object-fit:${objectFit};display:block"/>
         </div>
       </div>
+
       <div class="card" style="padding:40px">
         <div style="font-size:60px;line-height:1.16;font-weight:800;letter-spacing:-0.4px;text-align:center">
           ${safe(hook)}
         </div>
       </div>
+
       <div class="footer"><div>${safe(handle)}</div><div>${safe(pageNo)}</div></div>
     </div>`;
   return pageShell(inner, { width, height });
 }
 
 // =====================
-// 2) NOTE_MARKDOWN = три блока: heading + quote + text
-//    (или одно поле body в markdown — парсим в эти три части)
+// 2) Заметка с Markdown (note_markdown)
 // =====================
+function buildNoteMarkdownHTML({
+  title = "",
+  markdown = "",
+  handle = "@do3",
+  pageNo = "1/5",
+  width = 1080,
+  height = 1350,
+}) {
+  const rendered = md.render(markdown || "");
+  const safeHtml = sanitizeHtml(rendered, {
+    allowedTags: [
+      "p","strong","em","u","s","ul","ol","li","blockquote","code","pre","br","hr",
+      "h1","h2","h3","h4","h5","h6","a"
+    ],
+    allowedAttributes: { a: ["href","title","target","rel"] },
+    allowedSchemes: ["http","https","mailto","tel"],
+  });
 
-// разложить markdown на три блока
-function parseMarkdownToBlocks(mdText = "") {
-  const lines = String(mdText || "").split(/\r?\n/);
-  let heading = "", quote = "", paras = [];
-
-  // первая НЕ пустая строка без ">" — заголовок (обрежем leading #)
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i].trim();
-    if (!l) continue;
-    if (l.startsWith(">")) break; // заголовка нет, сразу цитата
-    heading = l.replace(/^#+\s*/, "").trim();
-    // всё остальное пройдём ниже
-    lines.splice(0, i + 1);
-    break;
-  }
-
-  // соберём все строки с '>' подряд как одну цитату
-  while (lines.length && lines[0].trim().startsWith(">")) {
-    const l = lines.shift().trim().replace(/^>\s?/, "");
-    quote += (quote ? "\n" : "") + l;
-  }
-
-  // остаток — текст (склеим, сохраняя переносы абзацев)
-  const rest = lines.join("\n").trim();
-  if (rest) paras.push(rest);
-
-  return { heading, quote, text: paras.join("\n").trim() };
-}
-
-// HTML для трёх блоков
-function buildNoteBlocksHTML({ heading = "", quote = "", text = "", handle = "@do3", pageNo = "1/5", width = 1080, height = 1350 }) {
   const esc = (s) => String(s || "").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
   const inner = `
     <div class="wrap" style="gap:18px">
       <div style="color:#6a6a6a;font-size:24px">${esc(handle)} • ${esc(pageNo)}</div>
 
-      ${heading ? `
-      <div style="font-size:72px;line-height:1.08;font-weight:800;letter-spacing:-.6px;margin:6px 0 4px">
-        ${esc(heading)}
-      </div>` : ""}
+      ${title ? `
+        <div style="font-size:72px;line-height:1.08;font-weight:800;letter-spacing:-.6px;margin:6px 0 4px">
+          ${esc(title)}
+        </div>` : ""}
 
-      <div class="card" style="padding:36px 40px">
-        ${quote ? `
-          <blockquote style="
-            border-left:6px solid #111;margin:0 0 22px 0;padding-left:20px;
-            color:#2b2b2b;font-style:italic;font-size:40px;line-height:1.34">
-            ${esc(quote)}
-          </blockquote>` : ""}
-
-        ${text ? `
-          <div style="font-size:36px;line-height:1.34;margin-top:4px">
-            ${sanitizeHtml(md.renderInline(text), { allowedTags: ["strong","em","u","s","br","code"] })}
-          </div>` : ""}
+      <div class="card" style="padding:40px 44px">
+        <div style="font-size:38px;line-height:1.34">
+          <style>
+            blockquote{border-left:6px solid #111;margin:18px 0;padding-left:20px;color:#2b2b2b;font-style:italic}
+            ul,ol{margin:0 0 0 1.2em}
+            h1,h2,h3{margin:8px 0 10px}
+          </style>
+          ${safeHtml}
+        </div>
       </div>
 
       <div class="footer" style="border-top:2px solid rgba(0,0,0,.12);padding-top:16px;margin-top:8px">
         <div>сохранить</div><div>поделиться</div>
       </div>
+    </div>`;
+  return pageShell(inner, { width, height });
+}
+
+// =====================
+// 3) Только жирный тайтл (title_only)
+// =====================
+function buildTitleOnlyHTML({
+  title = "",
+  handle = "@do3",
+  pageNo = "1/5",
+  width = 1080,
+  height = 1350,
+}) {
+  const esc = (s) => String(s || "").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const inner = `
+    <div class="wrap" style="gap:24px;justify-content:center;align-items:center;text-align:center">
+      <div style="font-size:90px;line-height:1.1;font-weight:900;letter-spacing:-1px">
+        ${esc(title)}
+      </div>
+      <div class="footer"><div>${esc(handle)}</div><div>${esc(pageNo)}</div></div>
     </div>`;
   return pageShell(inner, { width, height });
 }
@@ -159,22 +185,20 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const {
-    style = "photo_caption",                 // "photo_caption" | "note_markdown"
+    style = "photo_caption",  // "photo_caption" | "note_markdown" | "title_only"
     // photo_caption:
     imageUrl = "",
     caption = "",
     fit = "cover",
-    // note_markdown (три блока или markdown-тело):
-    heading = "",
-    quote = "",
-    text = "",
+    // note_markdown:
+    title = "",
     body = "",
-    // общие:
+    // common:
     handle = "@do3",
     pageNo = "1/5",
     width = 1080,
     height = 1350,
-    return: retMode
+    return: retMode           // "binary" | "dataUrl"
   } = req.body || {};
 
   const binary = retMode === "binary" || req.query.binary === "1";
@@ -183,14 +207,20 @@ export default async function handler(req, res) {
     let html;
 
     if (style === "note_markdown") {
-      // если прислали готовые блоки — используем их,
-      // иначе разложим body (markdown) в три блока
-      let h = safe(heading), q = safe(quote), t = safe(text);
-      if (!h && !q && !t && body) {
-        const p = parseMarkdownToBlocks(body);
-        h = p.heading; q = p.quote; t = p.text;
-      }
-      html = buildNoteBlocksHTML({ heading: h, quote: q, text: t, handle: safe(handle), pageNo: safe(pageNo), width, height });
+      html = buildNoteMarkdownHTML({
+        title: safe(title),
+        markdown: safe(body),
+        handle: safe(handle),
+        pageNo: safe(pageNo),
+        width, height,
+      });
+    } else if (style === "title_only") {
+      html = buildTitleOnlyHTML({
+        title: safe(title),
+        handle: safe(handle),
+        pageNo: safe(pageNo),
+        width, height,
+      });
     } else {
       // photo_caption по умолчанию
       const imgData = imageUrl ? await fetchToDataUrl(imageUrl) : null;
@@ -233,7 +263,10 @@ export default async function handler(req, res) {
       res.setHeader("Content-Disposition", 'attachment; filename="slide.png"');
       return res.send(png);
     }
-    return res.status(200).json({ ok: true, width, height, dataUrl: `data:image/png;base64,${png.toString("base64")}` });
+
+    return res
+      .status(200)
+      .json({ ok: true, width, height, dataUrl: `data:image/png;base64,${png.toString("base64")}` });
   } catch (e) {
     console.error("render error:", e);
     return res.status(500).json({ ok: false, error: "Failed to render", detail: String(e?.message || e) });
