@@ -2,30 +2,53 @@ import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import { put } from "@vercel/blob";
 
-// ——— helper: безопасное имя файла
+// --- helper: безопасное имя файла
 const safeName = (s) => (s ? String(s).replace(/[^\w.-]/g, "_") : "");
 
-// ——— helper: подтянуть картинку и встроить data:URL (фикс CORS/hotlink)
-async function toDataUrl(page, url) {
-  if (!url) return null;
+// --- helper: привести dropbox ссылку к «сырой»
+function normalizeImageUrl(u = "") {
   try {
-    const data = await page.evaluate(async (u) => {
-      const resp = await fetch(u);
-      if (!resp.ok) throw new Error("img fetch failed");
-      const buf = await resp.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-      // попытка угадать content-type по расширению
-      const ext = (u.split("?")[0].split(".").pop() || "").toLowerCase();
-      const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-      return `data:${mime};base64,${b64}`;
-    }, url);
-    return data;
+    const url = new URL(u);
+    // Dropbox preview -> raw
+    if (url.hostname.includes("dropbox.com")) {
+      url.hostname = "dl.dropboxusercontent.com";
+      url.searchParams.set("raw", "1"); // на всякий случай
+      url.searchParams.delete("dl");
+      return url.toString();
+    }
+    return u;
   } catch {
+    return u;
+  }
+}
+
+// --- helper: скачать файл на сервере и превратить в data:URL (обходит CORS)
+async function fetchToDataUrl(url) {
+  if (!url) return null;
+  const norm = normalizeImageUrl(url);
+  try {
+    const resp = await fetch(norm);
+    if (!resp.ok) throw new Error(`IMG ${resp.status}`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+
+    // грубая эвристика по расширению/контент-тайпу
+    let mime =
+      resp.headers.get("content-type") ||
+      (/\.(png)(\?|$)/i.test(norm)
+        ? "image/png"
+        : /\.(webp)(\?|$)/i.test(norm)
+        ? "image/webp"
+        : "image/jpeg");
+
+    const b64 = buf.toString("base64");
+    return `data:${mime};base64,${b64}`;
+  } catch (e) {
+    console.error("fetchToDataUrl error:", e);
     return null;
   }
 }
 
-// ——— базовый CSS
+// --- базовый CSS
 function baseCSS({ width, height }) {
   return `
     *{box-sizing:border-box}
@@ -40,7 +63,7 @@ function baseCSS({ width, height }) {
   `;
 }
 
-// ——— шаблон: NOTES COVER (большой жирный хук, карточка заметки без иконок)
+// --- шаблон: NOTES COVER (жирный хук)
 function tplNotesCover({ hook, handle, pageNo }) {
   return {
     width: 1080,
@@ -55,9 +78,7 @@ function tplNotesCover({ hook, handle, pageNo }) {
         </div>
 
         <div class="card" style="padding:28px">
-          <div style="
-              font-size:54px; line-height:1.12; font-weight:800;
-              letter-spacing:-0.3px;">
+          <div style="font-size:54px;line-height:1.12;font-weight:800;letter-spacing:-.3px;text-align:center">
             ${hook}
           </div>
         </div>
@@ -68,7 +89,7 @@ function tplNotesCover({ hook, handle, pageNo }) {
   };
 }
 
-// ——— шаблон: PHOTO + HOOK (уменьшённая фотка, жирный хук)
+// --- шаблон: PHOTO + HOOK (фото 16:10, центрированный жирный хук)
 function tplPhotoHook({ imgSrc, hook, handle, pageNo }) {
   return {
     width: 1080,
@@ -84,9 +105,7 @@ function tplPhotoHook({ imgSrc, hook, handle, pageNo }) {
         </div>
 
         <div class="card" style="padding:28px">
-          <div style="
-              font-size:54px; line-height:1.12; font-weight:800;
-              letter-spacing:-0.3px;">
+          <div style="font-size:54px;line-height:1.12;font-weight:800;letter-spacing:-.3px;text-align:center">
             ${hook}
           </div>
         </div>
@@ -101,31 +120,24 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const {
-    // выбор стиля
-    style = "notes_cover",               // "notes_cover" | "photo_caption"
-    // данные
+    style = "notes_cover",          // "notes_cover" | "photo_caption"
     imageUrl = "",
-    caption = "",                        // текст хука
+    caption = "",
     handle = "@do3",
     pageNo = "1/5",
-    // системные
     width,
     height,
     filename
   } = req.body || {};
 
-  // определяем шаблон и размеры
+  // выбрать шаблон
   const usePhoto = style === "photo_caption";
   const tpl = usePhoto ? tplPhotoHook : tplNotesCover;
-  const view = tpl({
-    imgSrc: "",               // заполним ниже
-    hook: caption,
-    handle,
-    pageNo
-  });
 
-  const W = Number(width) || view.width;
-  const H = Number(height) || view.height;
+  // размеры по умолчанию из шаблона
+  const view0 = tpl({ imgSrc: "", hook: caption, handle, pageNo });
+  const W = Number(width) || view0.width;
+  const H = Number(height) || view0.height;
 
   try {
     const browser = await puppeteer.launch({
@@ -137,26 +149,25 @@ export default async function handler(req, res) {
 
     const page = await browser.newPage();
 
-    // если нужен снимок с картинкой — пробуем заинлайнить
-    let imgDataUrl = null;
-    if (usePhoto && imageUrl) {
-      imgDataUrl = await toDataUrl(page, imageUrl);
-    }
+    // серверная подгрузка картинки → data:URL
+    const imgDataUrl = usePhoto && imageUrl ? await fetchToDataUrl(imageUrl) : null;
 
-    // генерим итоговую страницу с базовым CSS
     const html = `
       <!doctype html><html lang="ru"><head><meta charset="utf-8"/>
       <style>${baseCSS({ width: W, height: H })}</style></head>
       <body>
-        ${ (usePhoto ? tplPhotoHook({ imgSrc: imgDataUrl || imageUrl, hook: caption, handle, pageNo })
-                     : tplNotesCover({ hook: caption, handle, pageNo })
-           ).html }
+        ${
+          (usePhoto
+            ? tplPhotoHook({ imgSrc: imgDataUrl || normalizeImageUrl(imageUrl), hook: caption, handle, pageNo })
+            : tplNotesCover({ hook: caption, handle, pageNo })
+          ).html
+        }
       </body></html>
     `;
 
     await page.setContent(html, { waitUntil: "networkidle0" });
 
-    // если есть <img>, дождёмся загрузки
+    // ждём возможные <img>
     try {
       await page.waitForSelector("img", { timeout: 4000 });
       await page.evaluate(async () => {
@@ -168,7 +179,7 @@ export default async function handler(req, res) {
     const png = await page.screenshot({ type: "png" });
     await browser.close();
 
-    // заливаем в Vercel Blob и отдаём ссылку
+    // заливаем в Blob и возвращаем ссылку
     const name = safeName(filename) || `slide_${Date.now()}.png`;
     try {
       const blob = await put(name, png, {
@@ -178,7 +189,6 @@ export default async function handler(req, res) {
       });
       return res.status(200).json({ ok: true, style, url: blob.url, filename: name });
     } catch {
-      // фолбэк: data URL
       const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
       return res.status(200).json({ ok: true, style, mode: "data-url", url: dataUrl, filename: name });
     }
