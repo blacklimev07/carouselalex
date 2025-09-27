@@ -11,22 +11,64 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function cssBase({ width, height, fontScale = 1 }) {
   return `
-    :root { --pad:64px; --radius:28px; --muted:#666; --ink:#111; --sep:rgba(0,0,0,.12); }
+    :root { --pad:64px; --radius:28px; --muted:#6a6a6a; --ink:#111; --sep:rgba(0,0,0,.12); }
     *{box-sizing:border-box} html,body{margin:0;padding:0}
-    body{width:${width}px;height:${height}px;background:#fbf7ea;font-family:-apple-system,Inter,system-ui,Segoe UI,Roboto,sans-serif;color:var(--ink);display:flex}
+    body{width:${width}px;height:${height}px;background:#F7F3E8;font-family:-apple-system,Inter,system-ui,Segoe UI,Roboto,sans-serif;color:var(--ink);display:flex}
+
     .wrap{padding:var(--pad);width:100%;display:flex;flex-direction:column;justify-content:space-between}
-    .header{font-size:${24*fontScale}px;color:var(--muted)}
+    .header{font-size:${22*fontScale}px;color:var(--muted)}
     .title{font-size:${64*fontScale}px;font-weight:800;margin:20px 0 16px;line-height:1.08;letter-spacing:-.5px}
     .content{font-size:${36*fontScale}px;line-height:1.28}
     blockquote{border-left:5px solid var(--ink);padding-left:20px;color:#2b2b2b;margin:18px 0;font-style:italic}
-    .footer{border-top:2px solid var(--sep);padding-top:16px;font-size:${24*fontScale}px;color:var(--muted);display:flex;justify-content:space-between}
-    .btn{display:inline-block;padding:${18*fontScale}px ${26*fontScale}px;border-radius:16px;background:#111;color:#fff;font-weight:700;text-decoration:none;font-size:${28*fontScale}px}
-    .card{background:#fff;border-radius:var(--radius);padding:${28*fontScale}px;box-shadow:0 8px 30px rgba(0,0,0,.06)}
-    img{max-width:100%;display:block}
+    .footer{border-top:2px solid var(--sep);padding-top:16px;font-size:${22*fontScale}px;color:var(--muted);display:flex;justify-content:space-between}
+    .card{background:#fff;border-radius:32px;padding:${28*fontScale}px;box-shadow:0 16px 40px rgba(0,0,0,.06)}
+    img{max-width:100%;display:block;border-radius:24px}
+
+    /* ——— Notes header ——— */
+    .notes-card{padding:0;overflow:hidden;border-radius:38px;background:#fff;box-shadow:0 16px 40px rgba(0,0,0,.07)}
+    .notes-head{
+      height:${84*fontScale}px;display:flex;align-items:center;gap:14px;
+      padding:0 ${28*fontScale}px;border-bottom:1px solid rgba(0,0,0,.06);
+      background:linear-gradient(#fff,#FDFCF9);
+    }
+    .back-chevron{
+      width:${36*fontScale}px;height:${36*fontScale}px;border-radius:50%;
+      display:grid;place-items:center;border:1px solid rgba(0,0,0,.08);color:#D4A100;font-weight:700
+    }
+    .notes-title{font-size:${36*fontScale}px;font-weight:800;color:#D4A100;flex:1}
+    .notes-dots{
+      width:${36*fontScale}px;height:${36*fontScale}px;border-radius:50%;
+      border:2px solid #F2C200; display:grid; place-items:center; color:#F2C200;
+    }
+    .notes-body{height:calc(100% - ${84*fontScale}px);background:#fff}
+    .spacing-16{height:16px}
   `;
 }
 
-// ——— Вьюшки
+/* ---------- VIEWS ---------- */
+
+const viewNotesCover = ({ coverTitle, captionHtml, handle, pageNo }) => ({
+  width: 1080,
+  height: 1350,
+  html: `
+  <div class="wrap" style="gap:22px">
+    <div class="notes-card" style="height:820px">
+      <div class="notes-head">
+        <div class="back-chevron">‹</div>
+        <div class="notes-title">Заметки</div>
+        <div class="notes-dots">•••</div>
+      </div>
+      <div class="notes-body"></div>
+    </div>
+
+    <div class="card">
+      <div class="content">${captionHtml}</div>
+    </div>
+
+    <div class="footer"><div>${esc(handle)}</div><div>${esc(pageNo)}</div></div>
+  </div>`
+});
+
 const viewPhotoCaption = ({ imageUrl, captionHtml, handle, pageNo }) => ({
   width: 1080,
   height: 1080,
@@ -67,33 +109,20 @@ const viewCTA = ({ titleHtml, bodyHtml, buttonText, buttonUrl, handle }) => ({
     <div class="content" style="max-width:820px;margin:0 auto">${bodyHtml}</div>
     ${
       buttonText
-        ? `<div style="margin-top:24px"><a class="btn" href="${esc(buttonUrl||'#')}" target="_blank" rel="noopener">${esc(buttonText)}</a></div>`
+        ? `<div style="margin-top:24px"><a style="display:inline-block;padding:18px 26px;border-radius:16px;background:#111;color:#fff;font-weight:700;text-decoration:none;font-size:28px" href="${esc(buttonUrl||'#')}" target="_blank" rel="noopener">${esc(buttonText)}</a></div>`
         : ""
     }
     <div style="margin-top:36px;color:#666">${esc(handle)}</div>
   </div>`
 });
 
-// ——— Автовыбор стиля
-function pickStyle({ style, imageUrl, body, caption, ctaButtonText, ctaUrl }) {
-  if (style && style !== "auto") return style;
-  // эвристики:
-  // 1) если есть кнопка — это CTA
-  if (ctaButtonText && ctaButtonText.trim().length > 0) return "cta";
-  // 2) если есть картинка — это фото+подпись
-  if (imageUrl && imageUrl.trim().length > 4) return "photo_caption";
-  // 3) если в тексте есть цитаты или он короткий — «quote»
-  const txt = String(caption || body || "");
-  if (txt.includes("> ") || txt.split(/\s+/).length < 40) return "quote";
-  // 4) по умолчанию — «quote»
-  return "quote";
-}
+/* ---------- MAIN ---------- */
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const {
-    style = "auto",       // "auto" | "photo_caption" | "quote" | "cta"
+    style = "notes_cover",   // "notes_cover" | "photo_caption" | "quote" | "cta"
     title = "",
     body = "",
     handle = "@anon",
@@ -110,16 +139,20 @@ export default async function handler(req, res) {
   } = req.body || {};
 
   try {
-    const chosen = pickStyle({ style, imageUrl, body, caption, ctaButtonText, ctaUrl });
-
     let view;
-    if (chosen === "photo_caption") {
+    if (style === "notes_cover") {
+      view = viewNotesCover({
+        coverTitle: esc(title),
+        captionHtml: mdSafe(caption ?? body),
+        handle, pageNo
+      });
+    } else if (style === "photo_caption") {
       view = viewPhotoCaption({
         imageUrl,
         captionHtml: mdSafe(caption ?? body),
         handle, pageNo
       });
-    } else if (chosen === "cta") {
+    } else if (style === "cta") {
       view = viewCTA({
         titleHtml: esc(title),
         bodyHtml: mdSafe(ctaText ?? body),
@@ -156,19 +189,13 @@ export default async function handler(req, res) {
     const png = await page.screenshot({ type: "png" });
     await browser.close();
 
-    // пробуем сохранить в Blob (вернём короткую ссылку), иначе — data URL
     const baseName = (filename && String(filename).replace(/[^\w.-]/g, "_")) || `slide_${Date.now()}.png`;
-
     try {
-      const blob = await put(baseName, png, {
-        access: "public",
-        contentType: "image/png",
-        addRandomSuffix: true
-      });
-      return res.status(200).json({ ok: true, style: chosen, mode: "blob", url: blob.url, filename: baseName });
+      const blob = await put(baseName, png, { access: "public", contentType: "image/png", addRandomSuffix: true });
+      return res.status(200).json({ ok: true, style, mode: "blob", url: blob.url, filename: baseName });
     } catch {
       const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
-      return res.status(200).json({ ok: true, style: chosen, mode: "data-url", url: dataUrl, filename: baseName });
+      return res.status(200).json({ ok: true, style, mode: "data-url", url: dataUrl, filename: baseName });
     }
   } catch (err) {
     console.error(err);
