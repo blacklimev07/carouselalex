@@ -1,116 +1,77 @@
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
-import MarkdownIt from "markdown-it";
-import sanitizeHtml from "sanitize-html";
+// render.js
+import express from "express";
+import bodyParser from "body-parser";
+import puppeteer from "puppeteer";
 
-const md = new MarkdownIt({ html: false, breaks: true, typographer: true });
+const app = express();
+app.use(bodyParser.json());
 
-// универсальный шаблон PHOTO + HOOK
-function tplPhotoHook({ imgSrc, hook, handle, pageNo }) {
-  return {
-    width: 1080,
-    height: 1350,
-    html: `
-      <div class="wrap">
-        <div class="card" style="overflow:hidden;border-radius:32px">
-          <div style="
-            width:100%;
-            height:620px;
-            background:${imgSrc ? `url('${imgSrc}') center / cover no-repeat` : "#eee"};
-          "></div>
-        </div>
-
-        <div class="card" style="padding:28px">
-          <div style="
-            font-size:54px;
-            line-height:1.12;
-            font-weight:800;
-            letter-spacing:-.3px;
-            text-align:center;
-          ">
-            ${hook}
-          </div>
-        </div>
-
-        <div class="footer"><div>${handle}</div><div>${pageNo}</div></div>
-      </div>
-    `
-  };
-}
-
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
-  const {
-    style = "photo_caption",
-    imageUrl = "",
-    caption = "",
-    handle = "@anon",
-    pageNo = "1/1"
-  } = req.body || {};
+app.post("/render", async (req, res) => {
+  const { style, imageUrl, caption, handle, pageNo } = req.body;
 
   try {
     const browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: { width: 1080, height: 1350, deviceScaleFactor: 2 },
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless
+      headless: "new", // новая headless-мода
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
-
     const page = await browser.newPage();
 
-    let tpl;
-    if (style === "photo_caption") {
-      tpl = tplPhotoHook({
-        imgSrc: imageUrl,
-        hook: sanitizeHtml(caption),
-        handle,
-        pageNo
-      });
-    } else {
-      throw new Error(`Unknown style: ${style}`);
-    }
-
+    // HTML-шаблон для рендера
     const html = `
-      <!doctype html>
-      <html lang="ru">
-      <head>
-        <meta charset="utf-8"/>
-        <style>
-          body {
-            margin:0;
-            background:#fbf7ea;
-            font-family:-apple-system, Inter, system-ui, Segoe UI, Roboto, sans-serif;
-            display:flex;
-            justify-content:center;
-            align-items:center;
-            width:${tpl.width}px;
-            height:${tpl.height}px;
-          }
-          .wrap {
-            width:100%;
-            height:100%;
-            padding:48px;
-            display:flex;
-            flex-direction:column;
-            justify-content:space-between;
-            box-sizing:border-box;
-          }
-          .card {
-            background:#fff;
-            border-radius:32px;
-            box-shadow:0 4px 20px rgba(0,0,0,.08);
-          }
-          .footer {
-            font-size:24px;
-            color:#666;
-            display:flex;
-            justify-content:space-between;
-            padding:8px 4px 0;
-          }
-        </style>
-      </head>
-      <body>${tpl.html}</body>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              background: #f9f6ef;
+              margin: 0;
+              padding: 20px;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+            }
+            .card {
+              width: 700px;
+              background: #fff;
+              border-radius: 20px;
+              box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+              overflow: hidden;
+              display: flex;
+              flex-direction: column;
+            }
+            .photo {
+              width: 100%;
+              height: 400px;
+              background: #eee url('${imageUrl}') center/cover no-repeat;
+            }
+            .caption {
+              padding: 20px;
+              font-size: 28px;
+              font-weight: bold;
+              text-align: center;
+              line-height: 1.4;
+            }
+            .footer {
+              display: flex;
+              justify-content: space-between;
+              padding: 10px 20px;
+              font-size: 16px;
+              color: #555;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="photo"></div>
+            <div class="caption">${caption}</div>
+            <div class="footer">
+              <span>${handle}</span>
+              <span>${pageNo}</span>
+            </div>
+          </div>
+        </body>
       </html>
     `;
 
@@ -118,11 +79,17 @@ export default async function handler(req, res) {
     const buffer = await page.screenshot({ type: "png" });
     await browser.close();
 
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Disposition", 'inline; filename="note.png"');
-    return res.send(buffer);
+    // отдаем как base64 dataURL
+    const base64 = buffer.toString("base64");
+    res.json({ 
+      image: `data:image/png;base64,${base64}`
+    });
   } catch (err) {
-    console.error("Renderer error:", err);
-    res.status(500).json({ error: "Failed to render image", detail: String(err) });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-}
+});
+
+app.listen(3000, () => {
+  console.log("Renderer running on http://localhost:3000");
+});
