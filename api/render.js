@@ -109,7 +109,6 @@ function buildPhotoHTML({
 
 // =====================
 // 2) Заметка с Markdown (note_markdown)
-//     - поддерживает **жирный**, *курсив*, > цитаты
 // =====================
 function buildNoteMarkdownHTML({
   title = "",
@@ -159,13 +158,59 @@ function buildNoteMarkdownHTML({
 }
 
 // =====================
+// 3) Заметка блоками (note_blocks)
+//     - heading (заголовок)
+//     - quote (цитата)
+//     - text (вывод)
+// =====================
+function buildNoteBlocksHTML({
+  heading = "",
+  quote = "",
+  text = "",
+  handle = "@do3",
+  pageNo = "1/5",
+  width = 1080,
+  height = 1350,
+}) {
+  const esc = (s) => String(s || "").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const inner = `
+    <div class="wrap" style="gap:18px">
+      <div style="color:#6a6a6a;font-size:24px">${esc(handle)} • ${esc(pageNo)}</div>
+
+      ${heading ? `
+      <div style="font-size:72px;line-height:1.08;font-weight:800;letter-spacing:-.6px;margin:6px 0 4px">
+        ${esc(heading)}
+      </div>` : ""}
+
+      <div class="card" style="padding:36px 40px">
+        ${quote ? `
+          <blockquote style="
+            border-left:6px solid #111;margin:0 0 22px 0;padding-left:20px;
+            color:#2b2b2b;font-style:italic;font-size:40px;line-height:1.34">
+            ${esc(quote)}
+          </blockquote>` : ""}
+
+        ${text ? `
+          <div style="font-size:36px;line-height:1.34;margin-top:4px">
+            ${esc(text)}
+          </div>` : ""}
+      </div>
+
+      <div class="footer" style="border-top:2px solid rgba(0,0,0,.12);padding-top:16px;margin-top:8px">
+        <div>сохранить</div><div>поделиться</div>
+      </div>
+    </div>`;
+  return pageShell(inner, { width, height });
+}
+
+// =====================
 // Handler
 // =====================
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const {
-    style = "photo_caption",  // "photo_caption" | "note_markdown"
+    style = "photo_caption",  // "photo_caption" | "note_markdown" | "note_blocks"
     // photo_caption:
     imageUrl = "",
     caption = "",
@@ -173,12 +218,16 @@ export default async function handler(req, res) {
     // note_markdown:
     title = "",
     body = "",
+    // note_blocks:
+    heading = "",
+    quote = "",
+    text = "",
     // common:
     handle = "@do3",
     pageNo = "1/5",
     width = 1080,
     height = 1350,
-    return: retMode           // "binary" | "dataUrl"
+    return: retMode
   } = req.body || {};
 
   const binary = retMode === "binary" || req.query.binary === "1";
@@ -190,6 +239,15 @@ export default async function handler(req, res) {
       html = buildNoteMarkdownHTML({
         title: safe(title),
         markdown: safe(body),
+        handle: safe(handle),
+        pageNo: safe(pageNo),
+        width, height,
+      });
+    } else if (style === "note_blocks") {
+      html = buildNoteBlocksHTML({
+        heading: safe(heading),
+        quote: safe(quote),
+        text: safe(text),
         handle: safe(handle),
         pageNo: safe(pageNo),
         width, height,
@@ -216,8 +274,7 @@ export default async function handler(req, res) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
 
-    // Дожидаемся загрузки изображения только для photo_caption
-    if (style !== "note_markdown") {
+    if (style === "photo_caption") {
       await page.waitForSelector("img.photo", { timeout: 6000 }).catch(() => {});
       await page.evaluate(() => new Promise((resolve) => {
         const img = document.querySelector("img.photo");
